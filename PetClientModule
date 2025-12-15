@@ -1,0 +1,83 @@
+local PetClientModule = {}
+
+function PetClientModule.Init()
+	local RunService = game:GetService("RunService")
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+	local plr = Players.LocalPlayer
+	local char = plr.Character or plr.CharacterAdded:Wait()
+
+	local config = require(ReplicatedStorage:WaitForChild("CONFIGURATION"))
+	local maxAngle = 120
+
+	local function getPetRootPart(character)
+		return character:FindFirstChild("UpperTorso") 
+			or character:FindFirstChild("Torso") 
+			or character:FindFirstChild("HumanoidRootPart")
+	end
+
+	local function isPetValid(pet)
+		if not pet:IsA("Model") then return false end
+
+		local isBackpack = pet:GetAttribute("IsBackpack")
+		if isBackpack then return false end
+
+		if not pet.PrimaryPart then return false end
+		if not pet.PrimaryPart:FindFirstChild("AlignPosition") then return false end
+		if not pet.PrimaryPart:FindFirstChild("AlignOrientation") then return false end
+
+		return true
+	end
+
+	local function movePets()
+		if not char or not char:FindFirstChild("Humanoid") then return end
+		if char.Humanoid.Health <= 0 then return end
+
+		local equippedPets = char:FindFirstChild("EQUIPPED PETS")
+		if not equippedPets then return end
+
+		local validPets = {}
+
+		for _, pet in pairs(equippedPets:GetChildren()) do
+			if isPetValid(pet) then
+				table.insert(validPets, pet)
+			end
+		end
+
+		local numPets = #validPets
+		if numPets == 0 then return end
+
+		local degreesIncrement = maxAngle / math.max(numPets - 1, 1)
+
+		for petNum, pet in pairs(validPets) do
+			local deg = (petNum - 1) * degreesIncrement - 90 + (180 - maxAngle) / 2
+			if numPets == 1 then
+				deg = 0
+			end
+
+			local rootPart = getPetRootPart(char)
+			if not rootPart then return end
+
+			local goalCF = rootPart.CFrame
+			goalCF = goalCF * CFrame.Angles(0, math.rad(deg), 0)
+			goalCF = (goalCF - goalCF.LookVector * 8)
+			goalCF = goalCF * CFrame.Angles(0, -math.rad(deg), 0)
+
+			if pet.PrimaryPart and pet.PrimaryPart:FindFirstChild("AlignPosition") and pet.PrimaryPart:FindFirstChild("AlignOrientation") then
+				pet.PrimaryPart.AlignPosition.Position = goalCF.Position
+				pet.PrimaryPart.AlignOrientation.CFrame = goalCF
+			end
+		end
+	end
+
+	plr.CharacterAdded:Connect(function(newChar)
+		char = newChar
+	end)
+
+	RunService.Heartbeat:Connect(movePets)
+
+	print("✅ Pet Client Module Initialized for", plr.Name)
+end
+
+return PetClientModule
