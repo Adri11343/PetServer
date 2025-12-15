@@ -1,0 +1,133 @@
+--[[
+	BACKPACK SYSTEM
+	ModuleScript en: ServerScriptService > PetServer > BackpackSystem
+	
+	Sistema de toggle para mochilas existentes
+	Las mochilas se obtienen como mascotas, este sistema solo las equipa/desequipa con tecla B
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
+local BackpackModule = require(script.Parent:WaitForChild("BackpackModule"))
+local CollisionManager = require(script.Parent:WaitForChild("CollisionManager"))
+
+--------------------------------------------------------------------------------
+--// STORAGE: Guardar instancias de mochilas por modelo
+--------------------------------------------------------------------------------
+local backpackInstances = {} -- {[model] = backpackInstance}
+
+--------------------------------------------------------------------------------
+local BackpackSystem = {}
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN: Buscar o crear instancia de mochila
+--------------------------------------------------------------------------------
+local function getOrCreateBackpackInstance(model, player)
+	-- Si ya existe una instancia para este modelo, usarla
+	if backpackInstances[model] then
+		return backpackInstances[model]
+	end
+
+	-- Si no existe, crear una nueva instancia
+	-- (esto solo debería pasar si CreatePet no guardó la referencia correctamente)
+	warn("⚠️ Creando instancia de mochila on-demand para", player.Name)
+
+	-- Necesitamos el template original, pero como ya está clonado, usamos el modelo actual
+	local backpack = setmetatable({
+		Model = model,
+		Player = player,
+		CollisionManager = CollisionManager,
+		Humanoid = model:FindFirstChild("Humanoid"),
+		RootPart = model:FindFirstChild("HumanoidRootPart"),
+		FollowScript = model:FindFirstChild("FollowScript"),
+		IsEquipped = false,
+		Weld = nil
+	}, BackpackModule)
+
+	backpackInstances[model] = backpack
+
+	return backpack
+end
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN: Buscar mochila del jugador en EQUIPPED PETS
+--------------------------------------------------------------------------------
+local function findPlayerBackpack(player)
+	local character = player.Character
+	if not character then return nil end
+
+	local equippedFolder = character:FindFirstChild("EQUIPPED PETS")
+	if not equippedFolder then return nil end
+
+	-- Buscar modelo con atributo IsBackpack
+	for _, model in pairs(equippedFolder:GetChildren()) do
+		if model:IsA("Model") and model:GetAttribute("IsBackpack") then
+			-- Intentar obtener la instancia guardada
+			local backpack = getOrCreateBackpackInstance(model, player)
+			return backpack
+		end
+	end
+
+	return nil
+end
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN: Registrar instancia de mochila (llamada por CreatePet)
+--------------------------------------------------------------------------------
+function BackpackSystem.RegisterBackpack(model, backpackInstance)
+	backpackInstances[model] = backpackInstance
+
+	-- Limpiar cuando el modelo se destruye
+	model.AncestryChanged:Connect(function()
+		if not model:IsDescendantOf(game) then
+			backpackInstances[model] = nil
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+--// EVENTO: Toggle Backpack
+--------------------------------------------------------------------------------
+local function onToggleBackpack(player)
+	-- Validar jugador
+	if not player or not player.Character then return end
+
+	-- Buscar la mochila que ya existe (creada por CreatePet)
+	local backpack = findPlayerBackpack(player)
+
+	if not backpack then
+		warn("⚠️", player.Name, "no tiene una mochila equipada")
+		return
+	end
+
+	-- Toggle equipar/desequipar
+	local success = backpack:Toggle()
+
+	if success then
+		print("🎒", player.Name, backpack.IsEquipped and "equipó" or "desequipó", "su mochila")
+	end
+end
+
+--------------------------------------------------------------------------------
+--// INICIALIZACIÓN
+--------------------------------------------------------------------------------
+function BackpackSystem.Init()
+	-- Crear RemoteEvent si no existe
+	local toggleBackpackEvent = remotes:FindFirstChild("ToggleBackpack")
+	if not toggleBackpackEvent then
+		toggleBackpackEvent = Instance.new("RemoteEvent")
+		toggleBackpackEvent.Name = "ToggleBackpack"
+		toggleBackpackEvent.Parent = remotes
+		print("✅ Created ToggleBackpack RemoteEvent")
+	end
+
+	-- Conectar evento
+	toggleBackpackEvent.OnServerEvent:Connect(onToggleBackpack)
+
+	print("✅ Backpack System Loaded - Press B to toggle equipped backpacks")
+end
+
+--------------------------------------------------------------------------------
+return BackpackSystem
