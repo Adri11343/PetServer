@@ -1,0 +1,128 @@
+-- ⭐ PET SYSTEM - MINIMAL ⭐
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Cache temporal de datos de mascotas por jugador
+local PlayerPetData = {}
+
+-- Cargar datos de mascotas desde el DataStore
+function LoadPlayerData(player, petData)
+	if not petData then
+		petData = {
+			Inventory = {},
+			Equipped = {},
+			Stats = {}
+		}
+	end
+	
+	PlayerPetData[player] = petData
+	
+	-- Crear folders temporales para compatibilidad con el sistema existente
+	local inventory = Instance.new("Folder")
+	inventory.Name = "PetsInventory"
+	inventory.Parent = player
+	
+	local equipped = Instance.new("Folder")
+	equipped.Name = "PetsEquipped"
+	equipped.Parent = player
+	
+	-- Cargar mascotas del inventario
+	for petId, petInfo in pairs(petData.Inventory) do
+		local petObj = Instance.new("ObjectValue")
+		petObj.Name = tostring(petId)
+		petObj.Value = petInfo.PetName
+		petObj.Parent = inventory
+	end
+	
+	print("✅ Datos de mascotas cargados para", player.Name)
+end
+
+-- Guardar datos de mascotas al DataStore
+function SavePlayerData(player)
+	local petData = PlayerPetData[player]
+	if not petData then return end
+	
+	-- Intentar usar PlayerDataModule si está disponible
+	local success, PlayerDataModule = pcall(function()
+		return require(script.Parent.Parent.Modules.PlayerDataModule)
+	end)
+	
+	if success and PlayerDataModule then
+		local playerData = PlayerDataModule.Get(player)
+		if playerData then
+			-- Actualizar datos en el DataStore
+			playerData:Set({"Pets"}, petData)
+			print("✅ Datos de mascotas guardados para", player.Name)
+			return
+		end
+	end
+	
+	-- Fallback: solo guardar en memoria temporal
+	print("⚠️ Datos de mascotas guardados solo en memoria para", player.Name)
+end
+
+-- Añadir mascota al inventario
+function AddPetToDataStore(player, petName)
+	local petData = PlayerPetData[player]
+	if not petData then return false end
+	
+	local petId = #petData.Inventory + 1
+	petData.Inventory[petId] = {
+		PetName = petName,
+		Timestamp = os.time()
+	}
+	
+	-- Actualizar folders temporales
+	local inventory = player:FindFirstChild("PetsInventory")
+	if inventory then
+		local petObj = Instance.new("ObjectValue")
+		petObj.Name = tostring(petId)
+		petObj.Value = petName
+		petObj.Parent = inventory
+	end
+	
+	SavePlayerData(player)
+	return petId
+end
+
+-- Equipar mascota
+function EquipPetInDataStore(player, slotId, petId)
+	local petData = PlayerPetData[player]
+	if not petData then return false end
+	
+	petData.Equipped[slotId] = petId
+	
+	SavePlayerData(player)
+	return true
+end
+
+-- Desequipar mascota
+function UnequipPetInDataStore(player, slotId)
+	local petData = PlayerPetData[player]
+	if not petData then return false end
+	
+	petData.Equipped[slotId] = nil
+	
+	SavePlayerData(player)
+	return true
+end
+
+print("✅ PET SYSTEM LOADED (MINIMAL)")
+
+-- Return module table
+return {
+	LoadPlayerData = LoadPlayerData,
+	SavePlayerData = SavePlayerData,
+	AddPetToDataStore = AddPetToDataStore,
+	EquipPetInDataStore = EquipPetInDataStore,
+	UnequipPetInDataStore = UnequipPetInDataStore,
+	AddPet = function() return nil end,
+	DeletePet = function() return nil end,
+	EquipPet = function() return nil end,
+	UnequipPet = function() return nil end,
+	CreatePet = function() return nil end,
+	CollisionManager = function() return nil end,
+	BackpackSystem = function() return nil end,
+	UnifiedMutationSystem = function() return nil end
+}
