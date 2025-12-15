@@ -1,0 +1,52 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage:WaitForChild("CONFIGURATION"))
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN PRINCIPAL
+--------------------------------------------------------------------------------
+local function deletePet(player, petName)
+	if not player or not player.Parent then
+		warn("[DeletePet] Player inválido")
+		return false
+	end
+
+	if not petName or petName == "" then
+		warn("[DeletePet] Nombre de pet inválido")
+		return false
+	end
+
+	-- Verificar carpetas
+	local petsInventory = player:FindFirstChild("PetsInventory")
+	if not petsInventory then
+		warn("[DeletePet] Player no tiene carpeta de inventario")
+		return false
+	end
+
+	-- Buscar la mascota en el inventario
+	local petValue = nil
+	for _, invPet in pairs(petsInventory:GetChildren()) do
+		if invPet:IsA("ObjectValue") and invPet.Value and invPet.Value.Name == petName then
+			petValue = invPet
+			break
+		end
+	end
+
+	if not petValue then
+		warn("[DeletePet]", petName, "no encontrado en inventario de", player.Name)
+		return false
+	end
+
+	-- Eliminar la mascota
+	local deletedPetName = petValue.Value.Name
+	petValue:Destroy()
+
+	if Config.DebugMode then
+		print("[DeletePet] 🗑️", deletedPetName, "eliminado del inventario de", player.Name)
+	end
+
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- ✅ RETORNAR LA FUNCIÓN
+return deletePet
