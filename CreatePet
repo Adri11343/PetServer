@@ -1,0 +1,154 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local BackpackModule = require(script.Parent:WaitForChild("BackpackModule"))
+local BackpackSystem = require(script.Parent:WaitForChild("BackpackSystem"))
+local CollisionManager = require(script.Parent:WaitForChild("CollisionManager"))
+local PetFollowModule = require(script.Parent:WaitForChild("PetFollowModule"))
+local collisionInitialized = false
+--------------------------------------------------------------------------------
+--// ASIGNAR OWNER
+--------------------------------------------------------------------------------
+local function assignOwner(petClone, player)
+	local ownerValue = Instance.new("ObjectValue")
+	ownerValue.Name = "Owner"
+	ownerValue.Value = player
+	ownerValue.Parent = petClone
+	return ownerValue
+end
+--------------------------------------------------------------------------------
+--// CREAR MASCOTA NORMAL
+--------------------------------------------------------------------------------
+local function createNormalPet(player, equippedValue)
+	-- Esperar al character de forma más robusta
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:WaitForChild("Humanoid", 10)
+
+	-- Verificar que esté vivo
+	if not humanoid or humanoid.Health <= 0 then 
+		warn("❌ Humanoid no encontrado o muerto para", player.Name)
+		return 
+	end
+
+	local petTemplate = equippedValue.Value
+	if not petTemplate then 
+		warn("❌ No hay petTemplate en equippedValue")
+		return 
+	end
+
+	-- Aumentar timeout y manejar el error
+	local equippedFolder = character:WaitForChild("EQUIPPED PETS", 10)
+	if not equippedFolder then 
+		warn("❌ No se pudo encontrar EQUIPPED PETS para", player.Name)
+		return 
+	end
+
+	-- Clonar pet
+	local petClone = petTemplate:Clone()
+	petClone.Name = petTemplate.Name
+
+	-- Asignar owner
+	assignOwner(petClone, player)
+
+	-- Parent primero
+	petClone.Parent = equippedFolder
+
+	-- ⭐ AGREGAR YIELD para permitir replicación al cliente
+	task.wait(0.1)
+
+	-- Obtener número de slot
+	local slotNumber = tonumber(equippedValue.Name) or 1
+
+	-- Iniciar sistema de seguimiento
+	local followSystem = PetFollowModule.new(petClone, player, slotNumber)
+
+	-- Guardar referencias
+	local linkedPet = equippedValue:FindFirstChild("LINKED PET")
+	if linkedPet then
+		linkedPet.Value = petClone
+		local followRef = Instance.new("ObjectValue")
+		followRef.Name = "FollowSystem"
+		followRef.Value = followSystem
+		followRef.Parent = linkedPet
+	end
+
+	print("✅ Pet normal creada:", petClone.Name, "para", player.Name, "en slot", slotNumber)
+	return petClone
+end
+--------------------------------------------------------------------------------
+--// CREAR MOCHILA
+--------------------------------------------------------------------------------
+local function createBackpackPet(player, equippedValue)
+	local petTemplate = equippedValue.Value
+	if not petTemplate then 
+		warn("❌ No hay petTemplate para mochila")
+		return 
+	end
+
+	-- Esperar al character
+	local character = player.Character or player.CharacterAdded:Wait()
+	if not character then return end
+
+	if not collisionInitialized then
+		CollisionManager.Setup()
+		collisionInitialized = true
+	end
+
+	local backpack = BackpackModule.new(petTemplate, player, CollisionManager)
+	if not backpack then 
+		warn("❌ No se pudo crear BackpackModule para", player.Name)
+		return 
+	end
+
+	if backpack.Model then
+		assignOwner(backpack.Model, player)
+	end
+
+	-- ⭐ AGREGAR YIELD para replicación
+	task.wait(0.1)
+
+	-- Registrar la instancia de mochila en BackpackSystem
+	BackpackSystem.RegisterBackpack(backpack.Model, backpack)
+
+	-- Guardar referencia del modelo
+	local linkedPet = equippedValue:FindFirstChild("LINKED PET")
+	if linkedPet then
+		linkedPet.Value = backpack.Model
+	end
+
+	print("✅ Mochila creada y registrada:", backpack.Model.Name, "para", player.Name)
+	return backpack
+end
+--------------------------------------------------------------------------------
+--// FUNCIÓN PRINCIPAL
+--------------------------------------------------------------------------------
+local function createPet(player, equippedValue)
+	if not player or not player.Parent then 
+		warn("❌ Player no válido o no tiene Parent")
+		return 
+	end
+
+	if not equippedValue or not equippedValue:IsA("ObjectValue") then 
+		warn("❌ equippedValue no válido")
+		return 
+	end
+
+	if equippedValue.Parent ~= player.PetsEquipped then 
+		warn("❌ equippedValue no está en PetsEquipped")
+		return 
+	end
+
+	local petTemplate = equippedValue.Value
+	if not petTemplate then 
+		warn("❌ No hay petTemplate en equippedValue")
+		return 
+	end
+
+	local isBackpack = petTemplate:GetAttribute("IsBackpack")
+
+	if isBackpack then
+		return createBackpackPet(player, equippedValue)
+	else
+		return createNormalPet(player, equippedValue)
+	end
+end
+--------------------------------------------------------------------------------
+return createPet
