@@ -1,0 +1,247 @@
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("CONFIGURATION"))
+
+local Backpack = {}
+Backpack.__index = Backpack
+
+--------------------------------------------------------------------------------
+--// AUXILIARES
+--------------------------------------------------------------------------------
+local function setHumanoidStates(humanoid, enableList)
+	for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+		if state ~= Enum.HumanoidStateType.None and state ~= Enum.HumanoidStateType.Physics then
+			pcall(function()
+				humanoid:SetStateEnabled(state, false)
+			end)
+		end
+	end
+
+	for _, state in ipairs(enableList) do
+		pcall(function()
+			humanoid:SetStateEnabled(state, true)
+		end)
+	end
+end
+
+-- MODIFICADO: Solo busca el folder, NO lo crea (seguridad)
+local function getPlayerFolder(player)
+	local character = player.Character
+	if not character then return nil end
+
+	-- Solo busca el folder "EQUIPPED PETS" que el sistema de mascotas crea
+	-- NO lo crea para evitar exploits/dupes
+	local folder = character:FindFirstChild("EQUIPPED PETS")
+
+	return folder
+end
+
+--------------------------------------------------------------------------------
+--// CONSTRUCTOR
+--------------------------------------------------------------------------------
+function Backpack.new(template, player, collisionManager)
+	local self = setmetatable({}, Backpack)
+
+	self.Player = player
+	self.CollisionManager = collisionManager
+	self.PlayerFolder = getPlayerFolder(player)
+
+	if not self.PlayerFolder then return nil end
+
+	self.Model = template:Clone()
+	self.Model.Name = "Backpack_" .. player.UserId
+
+	self.Humanoid = self.Model:FindFirstChild("Humanoid")
+	self.RootPart = self.Model:FindFirstChild("HumanoidRootPart")
+	self.FollowScript = self.Model:FindFirstChild("FollowScript")
+
+	if not self.Humanoid or not self.RootPart then
+		self.Model:Destroy()
+		return nil
+	end
+
+	local ownerTag = Instance.new("StringValue")
+	ownerTag.Name = "OwnerUserId"
+	ownerTag.Value = tostring(player.UserId)
+	ownerTag.Parent = self.Model
+
+	self.Model.Parent = self.PlayerFolder
+
+	self.IsEquipped = false
+	self.Weld = nil
+
+	self:_setupPhysics()
+	self:_setupHumanoid("following")
+
+	return self
+end
+
+--------------------------------------------------------------------------------
+--// SETUP
+--------------------------------------------------------------------------------
+function Backpack:_setupPhysics()
+	for _, part in ipairs(self.Model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+			part.Massless = true
+			part.CanQuery = false
+			if part.Name == "HumanoidRootPart" then
+				part.Transparency = 1
+			end
+		end
+	end
+
+	local groupName = Config.CollisionGroups and Config.CollisionGroups.Backpack or "BackpackNPC"
+	self.CollisionManager.SetGroup(self.Model, groupName)
+end
+
+function Backpack:_setupHumanoid(mode)
+	if not self.Humanoid then return end
+
+	self.Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	self.Humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+
+	if mode == "equipped" then
+		self.Humanoid.PlatformStand = true
+		self.Humanoid.AutoRotate = false
+		self.Humanoid.WalkSpeed = 0
+		self.Humanoid.JumpPower = 0
+		setHumanoidStates(self.Humanoid, {})
+
+		if self.RootPart then
+			self.RootPart.Anchored = false
+			self.RootPart.AssemblyLinearVelocity = Vector3.zero
+			self.RootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+	else
+		self.Humanoid.PlatformStand = false
+		self.Humanoid.AutoRotate = true
+		self.Humanoid.WalkSpeed = Config.NPCWalkSpeed
+		self.Humanoid.JumpPower = Config.NPCJumpPower
+
+		setHumanoidStates(self.Humanoid, {
+			Enum.HumanoidStateType.Running,
+			Enum.HumanoidStateType.Jumping,
+			Enum.HumanoidStateType.Landed,
+			Enum.HumanoidStateType.GettingUp,
+			Enum.HumanoidStateType.Freefall,
+			Enum.HumanoidStateType.Climbing,
+			Enum.HumanoidStateType.Swimming,
+		})
+
+		if self.RootPart then
+			self.RootPart.Anchored = false
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+--// EQUIPAR/DESEQUIPAR
+--------------------------------------------------------------------------------
+function Backpack:Equip()
+	if self.IsEquipped then return false end
+
+	local character = self.Player.Character
+	if not character then return false end
+
+	local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+	if not torso or not self.RootPart then return false end
+
+	if self.FollowScript then
+		self.FollowScript.Disabled = true
+	end
+
+	self:_setupHumanoid("equipped")
+
+	RunService.Heartbeat:Wait()
+
+	local isR15 = character:FindFirstChild("UpperTorso") ~= nil
+	local equipOffset = isR15 and Config.EquipOffset.R15 or Config.EquipOffset.R6
+
+	self.RootPart.CFrame = torso.CFrame * equipOffset
+
+	RunService.Heartbeat:Wait()
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "BackpackWeld"
+	weld.Part0 = torso
+	weld.Part1 = self.RootPart
+	weld.Parent = self.RootPart
+
+	self.Weld = weld
+	self.IsEquipped = true
+
+	return true
+end
+
+function Backpack:Unequip()
+	if not self.IsEquipped then return false end
+
+	local character = self.Player.Character
+	if not character then return false end
+
+	local charRoot = character:FindFirstChild("HumanoidRootPart")
+	if not charRoot then return false end
+
+	if self.Weld then
+		self.Weld:Destroy()
+		self.Weld = nil
+	end
+
+	local offset = charRoot.CFrame.LookVector * Config.UnequipDistance
+	local targetPos = charRoot.Position + offset
+
+	local rayOrigin = targetPos + Vector3.new(0, 10, 0)
+	local rayDirection = Vector3.new(0, -50, 0)
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = {character, self.Model}
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local result = workspace:Raycast(rayOrigin, rayDirection, params)
+	if result then
+		targetPos = result.Position + Vector3.new(0, 3, 0)
+	end
+
+	self.RootPart.CFrame = CFrame.new(targetPos, charRoot.Position)
+
+	RunService.Heartbeat:Wait()
+
+	self:_setupHumanoid("following")
+
+	if self.FollowScript then
+		self.FollowScript.Disabled = false
+	end
+
+	self.IsEquipped = false
+
+	return true
+end
+
+function Backpack:Toggle()
+	return self.IsEquipped and self:Unequip() or self:Equip()
+end
+
+-- MODIFICADO: Ya no elimina el folder porque es compartido con las mascotas
+function Backpack:Destroy()
+	if self.Weld then
+		pcall(function() self.Weld:Destroy() end)
+		self.Weld = nil
+	end
+
+	if self.Model then
+		pcall(function() self.Model:Destroy() end)
+		self.Model = nil
+	end
+
+	-- NO eliminamos el PlayerFolder porque lo usan las mascotas también
+
+	self.Player = nil
+	self.PlayerFolder = nil
+	self.Humanoid = nil
+	self.RootPart = nil
+	self.FollowScript = nil
+end
+
+--------------------------------------------------------------------------------
+return Backpack
