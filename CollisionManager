@@ -1,0 +1,113 @@
+local PhysicsService = game:GetService("PhysicsService")
+
+local CollisionManager = {}
+local groupCache = {}
+local registeredGroups = {}
+
+--------------------------------------------------------------------------------
+--// PRIVADAS
+--------------------------------------------------------------------------------
+local function groupExists(name)
+	return registeredGroups[name] == true
+end
+
+local function ensureGroup(name)
+	if groupExists(name) then return true end
+
+	local success = pcall(function()
+		PhysicsService:RegisterCollisionGroup(name)
+	end)
+
+	if success then
+		registeredGroups[name] = true
+	end
+
+	return success
+end
+
+local function setCollidable(group1, group2, canCollide)
+	return pcall(function()
+		PhysicsService:CollisionGroupSetCollidable(group1, group2, canCollide)
+	end)
+end
+
+--------------------------------------------------------------------------------
+--// PÚBLICAS
+--------------------------------------------------------------------------------
+function CollisionManager.Setup()
+	local success = true
+
+	success = ensureGroup("BackpackNPC") and success
+	success = ensureGroup("Players") and success
+
+	if success then
+		setCollidable("BackpackNPC", "Players", false)
+		setCollidable("BackpackNPC", "BackpackNPC", false)
+	end
+
+	return success
+end
+
+function CollisionManager.SetGroup(model, groupName)
+	if not model or not groupExists(groupName) then return false end
+	if groupCache[model] == groupName then return true end
+
+	local partsUpdated = 0
+
+	for _, part in pairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			pcall(function()
+				part.CollisionGroup = groupName
+				partsUpdated = partsUpdated + 1
+			end)
+		end
+	end
+
+	groupCache[model] = groupName
+
+	model.AncestryChanged:Connect(function()
+		if not model:IsDescendantOf(game) then
+			CollisionManager.RemoveFromCache(model)
+		end
+	end)
+
+	return true
+end
+
+function CollisionManager.RemoveFromCache(model)
+	groupCache[model] = nil
+end
+
+function CollisionManager.ClearCache()
+	groupCache = {}
+end
+
+function CollisionManager.GetGroup(model)
+	return groupCache[model]
+end
+
+function CollisionManager.IsGroupRegistered(groupName)
+	return groupExists(groupName)
+end
+
+function CollisionManager.GetRegisteredGroups()
+	local groups = {}
+	for groupName, _ in pairs(registeredGroups) do
+		table.insert(groups, groupName)
+	end
+	return groups
+end
+
+function CollisionManager.RegisterGroup(groupName)
+	return ensureGroup(groupName)
+end
+
+function CollisionManager.SetGroupCollision(group1, group2, canCollide)
+	if not groupExists(group1) or not groupExists(group2) then
+		return false
+	end
+	return setCollidable(group1, group2, canCollide)
+end
+
+--------------------------------------------------------------------------------
+return CollisionManager
