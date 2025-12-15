@@ -1,0 +1,110 @@
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage:WaitForChild("CONFIGURATION"))
+
+
+local function findEmptySlot(petsEquipped)
+	-- Obtener todos los slots y ordenarlos por nombre
+	local slots = {}
+	for _, slot in pairs(petsEquipped:GetChildren()) do
+		if slot:IsA("ObjectValue") then
+			table.insert(slots, slot)
+		end
+	end
+
+	table.sort(slots, function(a, b)
+		return tonumber(a.Name) < tonumber(b.Name)
+	end)
+
+	-- Buscar el primer slot vacío
+	for _, slot in ipairs(slots) do
+		if not slot.Value then
+			return slot
+		end
+	end
+
+	return nil
+end
+
+local function equipPet(player, petName, slotNumber)
+	if not player or not player.Parent then
+		warn("[EquipPet] Player inválido")
+		return false
+	end
+
+	if not petName or petName == "" then
+		warn("[EquipPet] Nombre de pet inválido")
+		return false
+	end
+
+	-- Verificar carpetas
+	local petsInventory = player:FindFirstChild("PetsInventory")
+	local petsEquipped = player:FindFirstChild("PetsEquipped")
+
+	if not petsInventory or not petsEquipped then
+		warn("[EquipPet] Player no tiene carpetas de inventario")
+		return false
+	end
+
+	-- ✅ SI NO SE ESPECIFICA SLOT, BUSCAR UNO VACÍO
+	local slot = nil
+	if not slotNumber or slotNumber == "" or slotNumber == "nil" or type(slotNumber) == "nil" then
+		slot = findEmptySlot(petsEquipped)
+		if not slot then
+			warn("[EquipPet] No hay slots disponibles para", player.Name)
+			return false
+		end
+		if Config.DebugMode then
+			print("[EquipPet] 🔍 Slot automático encontrado:", slot.Name)
+		end
+	else
+		-- Buscar slot específico
+		slotNumber = tostring(slotNumber)
+		slot = petsEquipped:FindFirstChild(slotNumber)
+		if not slot or not slot:IsA("ObjectValue") then
+			warn("[EquipPet] Slot", slotNumber, "no encontrado")
+			return false
+		end
+	end
+
+	-- Buscar la pet en el inventario
+	local petToEquip = nil
+	for _, petValue in pairs(petsInventory:GetChildren()) do
+		if petValue:IsA("ObjectValue") and petValue.Value and petValue.Value.Name == petName then
+			petToEquip = petValue
+			break
+		end
+	end
+
+	if not petToEquip then
+		warn("[EquipPet] Pet", petName, "no encontrada en inventario")
+		return false
+	end
+
+	-- Si el slot ya tiene algo, moverlo al inventario
+	if slot.Value then
+		local oldPet = Instance.new("ObjectValue")
+		oldPet.Value = slot.Value
+		oldPet.Name = slot.Value.Name
+		oldPet.Parent = petsInventory
+
+		if Config.DebugMode then
+			print("[EquipPet] 🔄 Pet anterior movida al inventario:", oldPet.Name)
+		end
+	end
+
+	-- Equipar la nueva pet
+	slot.Value = petToEquip.Value
+
+	-- Eliminar del inventario
+	petToEquip:Destroy()
+
+	if Config.DebugMode then
+		print("[EquipPet] ✅", petName, "equipada en slot", slot.Name, "para", player.Name)
+	end
+
+	return true
+end
+
+
+return equipPet
