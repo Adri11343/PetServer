@@ -1,0 +1,170 @@
+local RunService = game:GetService("RunService")
+
+local PetFollow = {}
+PetFollow.__index = PetFollow
+
+local FOLLOW_HEIGHT = 2
+local ORBIT_SPEED = 1
+local ORBIT_RADIUS = 3
+local FOLLOW_SPEED = 0.15
+
+--------------------------------------------------------------------------------
+--// CONSTRUCTOR
+--------------------------------------------------------------------------------
+function PetFollow.new(petModel, player, slotNumber)
+	local self = setmetatable({}, PetFollow)
+
+	self.Pet = petModel
+	self.Player = player
+	self.SlotNumber = slotNumber or 1
+	self.Active = true
+	self.OrbitAngle = (math.pi * 2 / 3) * (slotNumber - 1)
+
+	self:_setupPet()
+	self:_startFollowing()
+
+	return self
+end
+
+--------------------------------------------------------------------------------
+--// SETUP
+--------------------------------------------------------------------------------
+function PetFollow:_setupPet()
+	-- Buscar parte principal
+	local rootPart = self.Pet:FindFirstChild("HumanoidRootPart") 
+		or self.Pet:FindFirstChild("Base")
+		or self.Pet:FindFirstChild("Torso")
+		or self.Pet:FindFirstChild("Root")
+		or self.Pet.PrimaryPart
+
+	if not rootPart then return end
+
+	self.RootPart = rootPart
+	self.Pet.PrimaryPart = rootPart
+
+	-- Posicionar junto al jugador
+	local character = self.Player.Character
+	if character and character:FindFirstChild("HumanoidRootPart") then
+		local hrp = character.HumanoidRootPart
+		local spawnOffset = Vector3.new(
+			math.cos(self.OrbitAngle) * ORBIT_RADIUS,
+			FOLLOW_HEIGHT,
+			math.sin(self.OrbitAngle) * ORBIT_RADIUS
+		)
+		self.Pet:PivotTo(hrp.CFrame * CFrame.new(spawnOffset))
+	end
+
+	-- Configurar física
+	for _, part in pairs(self.Pet:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+			part.CanCollide = false
+			part.Massless = true
+
+			if part ~= rootPart then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = rootPart
+				weld.Part1 = part
+				weld.Parent = part
+			end
+		end
+	end
+
+	-- NetworkOwner
+	pcall(function()
+		rootPart:SetNetworkOwner(self.Player)
+	end)
+
+	-- BodyVelocity para movimiento suave
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(4000, 4000, 4000)
+	bv.Velocity = Vector3.zero
+	bv.Parent = rootPart
+	self.BodyVelocity = bv
+
+	-- BodyGyro para rotación
+	local bg = Instance.new("BodyGyro")
+	bg.MaxTorque = Vector3.new(4000, 4000, 4000)
+	bg.P = 3000
+	bg.D = 500
+	bg.Parent = rootPart
+	self.BodyGyro = bg
+end
+
+--------------------------------------------------------------------------------
+--// SEGUIMIENTO
+--------------------------------------------------------------------------------
+function PetFollow:_startFollowing()
+	self.Connection = RunService.Heartbeat:Connect(function(dt)
+		if not self.Active then return end
+		if not self.Player or not self.Player.Parent then
+			self:Destroy()
+			return
+		end
+
+		local character = self.Player.Character
+		if not character then return end
+
+		local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+		if not humanoidRootPart then return end
+
+		if not self.RootPart or not self.RootPart.Parent then
+			self:Destroy()
+			return
+		end
+
+		-- Actualizar ángulo
+		self.OrbitAngle = self.OrbitAngle + (ORBIT_SPEED * dt)
+
+		-- Calcular posición objetivo
+		local offset = Vector3.new(
+			math.cos(self.OrbitAngle) * ORBIT_RADIUS,
+			FOLLOW_HEIGHT,
+			math.sin(self.OrbitAngle) * ORBIT_RADIUS
+		)
+
+		local targetPosition = humanoidRootPart.Position + offset
+
+		-- Movimiento suave con BodyVelocity
+		if self.BodyVelocity then
+			local currentPos = self.RootPart.Position
+			local direction = (targetPosition - currentPos)
+			local distance = direction.Magnitude
+
+			-- Velocidad proporcional a la distancia
+			local speed = math.min(distance * 5, 50)
+			self.BodyVelocity.Velocity = direction.Unit * speed
+		end
+
+		-- Rotación suave hacia el jugador
+		if self.BodyGyro then
+			local lookDirection = (humanoidRootPart.Position - self.RootPart.Position).Unit
+			self.BodyGyro.CFrame = CFrame.new(self.RootPart.Position, self.RootPart.Position + lookDirection)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+--// DESTRUIR
+--------------------------------------------------------------------------------
+function PetFollow:Destroy()
+	self.Active = false
+
+	if self.Connection then
+		self.Connection:Disconnect()
+		self.Connection = nil
+	end
+
+	if self.BodyVelocity then
+		self.BodyVelocity:Destroy()
+		self.BodyVelocity = nil
+	end
+
+	if self.BodyGyro then
+		self.BodyGyro:Destroy()
+		self.BodyGyro = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+return PetFollow
