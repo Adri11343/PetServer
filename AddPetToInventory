@@ -1,0 +1,139 @@
+--[[
+═══════════════════════════════════════════════════════════════
+  ADD PET TO INVENTORY + PET INDEX INTEGRATION
+  ServerScriptService → PetServer → AddPetToInventory
+═══════════════════════════════════════════════════════════════
+--]]
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+
+-- ✅ NO REQUERIR NADA MÁS AQUÍ PARA EVITAR RECURSIÓN
+local pets = ReplicatedStorage:WaitForChild("Pets")
+local configModule = ReplicatedStorage:WaitForChild("CONFIGURATION")
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN PARA BUSCAR PET
+--------------------------------------------------------------------------------
+local function findPetTemplate(petName, rarityName)
+	-- Validación temprana
+	if not petName or petName == "" then
+		return nil
+	end
+	-- Si se especifica rareza, buscar en esa carpeta
+	if rarityName and rarityName ~= "" then
+		local rarityFolder = pets:FindFirstChild(rarityName)
+		if rarityFolder then
+			local pet = rarityFolder:FindFirstChild(petName)
+			if pet then 
+				return pet 
+			end
+		end
+	end
+	-- Búsqueda recursiva en todas las carpetas
+	return pets:FindFirstChild(petName, true)
+end
+
+--------------------------------------------------------------------------------
+--// FUNCIÓN PRINCIPAL
+--------------------------------------------------------------------------------
+local function addPet(player, petName, rarityName)
+	-- ✅ REQUERIR CONFIG SOLO CUANDO SE NECESITE (evita recursión)
+	local Config = require(configModule)
+
+	-- ✅ VALIDACIÓN MEJORADA: Verificar player
+	if not player or not player.Parent then
+		warn("[AddPet] ❌ Player inválido o desconectado")
+		return false
+	end
+
+	-- ✅ VALIDACIÓN MEJORADA: Verificar petName
+	if not petName or type(petName) ~= "string" or petName == "" then
+		warn("[AddPet] ❌ Nombre de pet inválido:", petName, "| Player:", player.Name)
+		return false
+	end
+
+	-- Verificar carpeta de inventario
+	local petsInventory = player:FindFirstChild("PetsInventory")
+	if not petsInventory then
+		warn("[AddPet] ❌ Player no tiene PetsInventory:", player.Name)
+		return false
+	end
+
+	-- Verificar límite de inventario
+	if #petsInventory:GetChildren() >= Config.MaxPetsInventory then
+		warn("[AddPet] ⚠️ Inventario lleno de", player.Name)
+		return false
+	end
+
+	-- Buscar el template de la pet
+	local petTemplate = findPetTemplate(petName, rarityName)
+	if not petTemplate then
+		warn("[AddPet] ❌ Pet no encontrada:", petName, "| Rareza:", rarityName or "cualquier rareza")
+		return false
+	end
+
+	-- ✅ VALIDACIÓN ADICIONAL: Verificar que el template sea un Model
+	if not petTemplate:IsA("Model") then
+		warn("[AddPet] ❌ El template encontrado no es un Model:", petTemplate.ClassName)
+		return false
+	end
+
+	-- ✅ OBTENER RAREZA SI NO SE PROPORCIONÓ
+	if not rarityName or rarityName == "" then
+		rarityName = petTemplate.Parent and petTemplate.Parent.Name or "Unknown"
+	end
+
+	-- Crear ObjectValue en el inventario
+	local petValue = Instance.new("ObjectValue")
+	petValue.Name = petTemplate.Name
+	petValue.Value = petTemplate
+	petValue.Parent = petsInventory
+
+	-- ═══════════════════════════════════════════════════════════
+	-- ✅ INTEGRACIÓN CON PET INDEX
+	-- ═══════════════════════════════════════════════════════════
+	task.spawn(function()
+		-- Cargar PetIndex de forma segura (evita recursión)
+		local PetIndex = _G.PetIndex
+
+		if not PetIndex then
+			-- Intentar cargar si no está en _G
+			local success, module = pcall(function()
+				return require(ServerStorage.Server:WaitForChild("pet_index_server", 3))
+			end)
+
+			if success then
+				PetIndex = module
+			end
+		end
+
+		-- Registrar en el Index si está disponible
+		if PetIndex and PetIndex.UnlockPet then
+			local indexSuccess = PetIndex.UnlockPet(player, petName, rarityName)
+
+			if indexSuccess then
+				print("📖 [PetIndex]", player.Name, "registró:", petName, "(" .. rarityName .. ")")
+			elseif indexSuccess == false then
+				-- Ya está registrado o error menor, no es crítico
+				if Config.DebugMode then
+					print("ℹ️ [PetIndex]", petName, "ya estaba en el índice de", player.Name)
+				end
+			end
+		else
+			if Config.DebugMode then
+				warn("⚠️ [PetIndex] No disponible, pet no se registró en el índice")
+			end
+		end
+	end)
+	-- ═══════════════════════════════════════════════════════════
+
+	if Config.DebugMode then
+		print("[AddPet] ✅", petName, "agregada al inventario de", player.Name)
+	end
+
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- ✅ RETORNAR LA FUNCIÓN DIRECTAMENTE
+return addPet
